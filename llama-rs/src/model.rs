@@ -26,6 +26,9 @@ pub struct Model {
     // Must be kept alive for the model
     _context: ggml::Context,
 }
+
+unsafe impl Send for Model {}
+
 impl Model {
     pub(crate) fn new(
         context: ggml::Context,
