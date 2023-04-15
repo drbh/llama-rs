@@ -122,7 +122,7 @@ impl InferenceSession {
         }
     }
 
-    /// Sample the next token using top-p and top-k sampling.
+    /// Get the embeddings for the given prompt.
     pub fn get_embeddings<E: std::error::Error + 'static>(
         &mut self,
         model: &Model,
@@ -148,34 +148,8 @@ impl InferenceSession {
             return Err(InferenceError::ContextFull);
         }
 
-        // Store a reference to self.tokens to avoid conflicting borrows
-        let tokens = &self.tokens;
-
-        println!("prompt_tokens: {:?}", prompt_tokens);
-        println!("tokens: {:?}", tokens);
-
-        // for token in tokens {
-        // println!("token: {:?}", token);
-
-        model.evaluate(
-            //
-            self,
-            params,
-            &prompt_tokens,
-            &mut request,
-        );
+        model.evaluate(self, params, &prompt_tokens, &mut request);
         embeddings.push(request.embeddings.as_mut().unwrap().clone());
-        // break;
-        // }
-
-        println!(
-            "\nembeds => {:?}",
-            embeddings[0]
-                .clone()
-                .into_iter()
-                .take(10)
-                .collect::<Vec<f32>>()
-        );
         Ok(embeddings)
     }
 
