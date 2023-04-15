@@ -122,6 +122,63 @@ impl InferenceSession {
         }
     }
 
+    /// Sample the next token using top-p and top-k sampling.
+    pub fn get_embeddings<E: std::error::Error + 'static>(
+        &mut self,
+        model: &Model,
+        params: &InferenceParameters,
+        prompt: &str,
+    ) -> Result<Vec<Vec<f32>>, InferenceError> {
+        let mut embeddings = Vec::new();
+        let mut request = EvaluateOutputRequest {
+            all_logits: None,
+            embeddings: Some(Vec::default()),
+        };
+
+        let beginning_of_sentence = self.n_past == 0;
+
+        let vocab = model.vocabulary();
+        let prompt_tokens: Vec<TokenId> = vocab
+            .tokenize(prompt, beginning_of_sentence)?
+            .iter()
+            .map(|(_, tok)| *tok)
+            .collect();
+
+        if self.n_past + prompt_tokens.len() >= model.hparams.n_ctx {
+            return Err(InferenceError::ContextFull);
+        }
+
+        // Store a reference to self.tokens to avoid conflicting borrows
+        let tokens = &self.tokens;
+
+        println!("prompt_tokens: {:?}", prompt_tokens);
+        println!("tokens: {:?}", tokens);
+
+        // for token in tokens {
+        // println!("token: {:?}", token);
+
+        model.evaluate(
+            //
+            self,
+            params,
+            &prompt_tokens,
+            &mut request,
+        );
+        embeddings.push(request.embeddings.as_mut().unwrap().clone());
+        // break;
+        // }
+
+        println!(
+            "\nembeds => {:?}",
+            embeddings[0]
+                .clone()
+                .into_iter()
+                .take(10)
+                .collect::<Vec<f32>>()
+        );
+        Ok(embeddings)
+    }
+
     // todo: see if we can reduce the arguments here somehow - consolidate model and vocab maybe?
     /// Helper function to run inference with this session and the given model and vocabulary.
     /// The `callback` is called with each new token until inference is complete.
@@ -136,6 +193,8 @@ impl InferenceSession {
         rng: &mut impl rand::Rng,
         mut callback: impl FnMut(&str) -> Result<(), E>,
     ) -> Result<InferenceStats, InferenceError> {
+        println!("inference_with_prompt: {:?}", prompt);
+
         let maximum_token_count = maximum_token_count.unwrap_or(usize::MAX);
         if params.play_back_previous_tokens {
             // "Play back" the existing tokens, so that loading from an inference snapshot works

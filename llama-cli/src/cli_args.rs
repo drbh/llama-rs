@@ -9,6 +9,11 @@ use rand::SeedableRng;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub enum Args {
+
+    #[command()]
+    /// Generate embeddings for a prompt
+    Embeddings(Box<Infer>),
+
     #[command()]
     /// Use a model to infer the next tokens in a sequence, and exit
     Infer(Box<Infer>),

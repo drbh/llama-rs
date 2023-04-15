@@ -16,11 +16,128 @@ fn main() {
 
     let cli_args = Args::parse();
     match cli_args {
+        Args::Embeddings(args) => embeddings(&args),
         Args::Infer(args) => infer(&args),
         Args::DumpTokens(args) => dump_tokens(&args),
         Args::Repl(args) => interactive(&args, false),
         Args::ChatExperimental(args) => interactive(&args, true),
         Args::Convert(args) => convert_pth_to_ggml(&args.directory, args.element_type.into()),
+    }
+}
+
+fn embeddings(args: &cli_args::Infer) {
+    let prompt = args.prompt.as_deref().unwrap_or("");
+    let inference_session_params = llama_rs::InferenceSessionParameters::default();
+
+    let model = llama_rs::Model::load(
+        //
+        &args.model_load.model_path,
+        2048,
+        |progress| {
+            use llama_rs::LoadProgress;
+            match progress {
+                llama_rs::LoadProgress::HyperparametersLoaded(hparams) => {
+                    log::debug!("Loaded hyperparameters {hparams:#?}")
+                }
+                llama_rs::LoadProgress::ContextSize { bytes } => log::info!(
+                    "ggml ctx size = {:.2} MB\n",
+                    bytes as f64 / (1024.0 * 1024.0)
+                ),
+                llama_rs::LoadProgress::PartLoading {
+                    file,
+                    current_part,
+                    total_parts,
+                } => {
+                    let current_part = current_part + 1;
+                    log::info!(
+                        "Loading model part {}/{} from '{}'\n",
+                        current_part,
+                        total_parts,
+                        file.to_string_lossy(),
+                    )
+                }
+                llama_rs::LoadProgress::PartTensorLoaded {
+                    current_tensor,
+                    tensor_count,
+                    ..
+                } => {
+                    let current_tensor = current_tensor + 1;
+                    if current_tensor % 8 == 0 {
+                        log::info!("Loaded tensor {current_tensor}/{tensor_count}");
+                    }
+                }
+                llama_rs::LoadProgress::PartLoaded {
+                    file,
+                    byte_size,
+                    tensor_count,
+                } => {
+                    log::info!("Loading of '{}' complete", file.to_string_lossy());
+                    log::info!(
+                        "Model size = {:.2} MB / num tensors = {}",
+                        byte_size as f64 / 1024.0 / 1024.0,
+                        tensor_count
+                    );
+                }
+            }
+        },
+    )
+    .expect("Could not load model");
+
+    log::info!("Model fully loaded!");
+
+    let mut session = model.start_session(inference_session_params);
+
+    let inference_params = llama_rs::InferenceParameters {
+        n_threads: num_cpus::get_physical(),
+        n_batch: 8,
+        top_k: 40,
+        top_p: 0.95,
+        repeat_penalty: 1.30,
+        temperature: 0.80,
+        bias_tokens: llama_rs::TokenBias::default(),
+        play_back_previous_tokens: false,
+    };
+
+    let start = std::time::Instant::now();
+
+    for _ in 0..10 {
+        let start = std::time::Instant::now();
+        let res = session.get_embeddings::<Infallible>(&model, &inference_params, &prompt);
+
+        match res {
+            Ok(_) => (),
+            Err(llama_rs::InferenceError::ContextFull) => {
+                log::warn!("Context window full, stopping inference.")
+            }
+            Err(llama_rs::InferenceError::TokenizationFailed) => {
+                log::error!("Failed to tokenize initial prompt.");
+            }
+            Err(llama_rs::InferenceError::UserCallback(_))
+            | Err(llama_rs::InferenceError::EndOfText) => unreachable!("cannot fail"),
+        }
+        let end = std::time::Instant::now();
+
+        println!("Elapsed: {:?}", end - start);
+    }
+
+    let res = session.get_embeddings::<Infallible>(&model, &inference_params, &prompt);
+
+    let end = std::time::Instant::now();
+
+    println!("Elapsed: {:?}", end - start);
+
+    println!();
+
+    match res {
+        Ok(_) => (),
+        Err(llama_rs::InferenceError::ContextFull) => {
+            log::warn!("Context window full, stopping inference.")
+        }
+        Err(llama_rs::InferenceError::TokenizationFailed) => {
+            log::error!("Failed to tokenize initial prompt.");
+        }
+        Err(llama_rs::InferenceError::UserCallback(_))
+        | Err(llama_rs::InferenceError::EndOfText) => unreachable!("cannot fail"),
     }
 }
 
